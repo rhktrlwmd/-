@@ -15,7 +15,7 @@
 ## Репозиторий
 
 - [GitHub](https://github.com/rhktrlwmd/-)
-  - [Релиз v1.0.2](https://github.com/rhktrlwmd/-/releases/tag/v1.0.2)
+  - [Релиз v1.0.3](https://github.com/rhktrlwmd/-/releases/tag/v1.0.3)
 
 ## Приложенные файлы
 
