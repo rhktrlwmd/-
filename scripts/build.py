@@ -22,6 +22,8 @@ import pandas as pd
 LABS_DIR = ROOT / "labs"
 BIB = ROOT / "references.bib"
 COURSE_INFO = ROOT / "course-info.json"
+REPOSITORY_URL = "https://github.com/rhktrlwmd/-"
+RELEASE_VERSION = "v1.0.2"
 
 
 LAB_SPECS = [
@@ -903,8 +905,8 @@ def build_lab(spec: dict, info: dict) -> None:
 
 def render_lms_response(info: dict) -> None:
     response = ROOT / "lms-response.md"
-    repo_placeholder = "https://github.com/USERNAME/REPOSITORY"
-    release_placeholder = repo_placeholder + "/releases/tag/v1.0.0"
+    repo_placeholder = REPOSITORY_URL
+    release_placeholder = repo_placeholder + f"/releases/tag/{RELEASE_VERSION}"
     body = textwrap.dedent(
         f"""\
         ## Скринкасты
@@ -924,7 +926,7 @@ def render_lms_response(info: dict) -> None:
         ## Репозиторий
 
         - [GitHub]({repo_placeholder})
-          - [Релиз v1.0.0]({release_placeholder})
+          - [Релиз {RELEASE_VERSION}]({release_placeholder})
 
         ## Приложенные файлы
 

@@ -14,8 +14,8 @@
 
 ## Репозиторий
 
-- [GitHub](https://github.com/USERNAME/REPOSITORY)
-  - [Релиз v1.0.0](https://github.com/USERNAME/REPOSITORY/releases/tag/v1.0.0)
+- [GitHub](https://github.com/rhktrlwmd/-)
+  - [Релиз v1.0.2](https://github.com/rhktrlwmd/-/releases/tag/v1.0.2)
 
 ## Приложенные файлы
 
