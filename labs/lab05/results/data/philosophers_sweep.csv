@@ -1,0 +1,11 @@
+strategy,philosophers,throughput
+naive,4,0.9818
+naive,5,1.2455
+naive,6,1.4364
+naive,7,1.7045
+naive,8,1.9727
+asymmetric,4,0.9864
+asymmetric,5,1.1864
+asymmetric,6,1.3955
+asymmetric,7,1.6000
+asymmetric,8,1.8955

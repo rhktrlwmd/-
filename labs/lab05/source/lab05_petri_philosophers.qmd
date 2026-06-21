@@ -1,0 +1,86 @@
+# Сети Петри и обедающие философы
+
+Задача обедающих философов используется как компактный пример конфликтов за ресурсы. В коде ниже сравниваются две стратегии запуска переходов: наивная и асимметричная.
+
+```{julia}
+using Random
+using Printf
+
+results_dir = normpath(joinpath(@__DIR__, "..", "results", "data"))
+mkpath(results_dir)
+Random.seed!(25)
+
+function write_csv(path, headers, rows)
+    open(path, "w") do io
+        println(io, join(headers, ","))
+        for row in rows
+            println(io, join(string.(row), ","))
+        end
+    end
+end
+
+function simulate_philosophers(strategy; n = 5, steps = 160)
+    state = fill(1, n)  # 1 think, 2 hungry, 3 eat
+    eat_timer = fill(0, n)
+    forks = fill(true, n)
+    rows = Vector{Vector{String}}()
+    meals = 0
+
+    for step in 1:steps
+        for p in 1:n
+            if state[p] == 3
+                eat_timer[p] -= 1
+                if eat_timer[p] <= 0
+                    state[p] = 1
+                    left = p
+                    right = p == 1 ? n : p - 1
+                    forks[left] = true
+                    forks[right] = true
+                end
+            elseif state[p] == 1 && rand() < 0.35
+                state[p] = 2
+            end
+        end
+
+        order = strategy == "naive" ? collect(1:n) : vcat(1:2:n, 2:2:n)
+        for p in order
+            if state[p] == 2
+                left = p
+                right = p == 1 ? n : p - 1
+                if forks[left] && forks[right]
+                    forks[left] = false
+                    forks[right] = false
+                    state[p] = 3
+                    eat_timer[p] = 1
+                    meals += 1
+                end
+            end
+        end
+
+        waiting = count(==(2), state)
+        eating = count(==(3), state)
+        push!(rows, [strategy, string(step), string(waiting), string(eating)])
+    end
+    return rows, meals / steps
+end
+
+state_rows = Vector{Vector{String}}()
+for strategy in ("naive", "asymmetric")
+    rows, _ = simulate_philosophers(strategy)
+    append!(state_rows, rows)
+end
+write_csv(joinpath(results_dir, "philosophers_states.csv"), ["strategy", "step", "waiting", "eating"], state_rows)
+
+sweep_rows = Vector{Vector{String}}()
+for strategy in ("naive", "asymmetric")
+    for n in 4:8
+        _, throughput = simulate_philosophers(strategy, n = n, steps = 220)
+        push!(sweep_rows, [strategy, string(n), @sprintf("%.4f", throughput)])
+    end
+end
+write_csv(joinpath(results_dir, "philosophers_sweep.csv"), ["strategy", "philosophers", "throughput"], sweep_rows)
+println("lab05 done")
+```
+
+Полученные ряды позволяют сравнить среднее количество актов обслуживания и число ожидающих философов.
+

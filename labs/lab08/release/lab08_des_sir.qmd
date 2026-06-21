@@ -1,0 +1,98 @@
+# Дискретно-событийный SIR
+
+В завершающей лабораторной работе сравниваются две реализации эпидемической модели: событийная стохастическая и детерминированная ODE-модель. Для визуального сопоставления событийная траектория дискретизируется на равномерной временной сетке.
+
+```{julia}
+using Random
+using Printf
+
+results_dir = normpath(joinpath(@__DIR__, "..", "results", "data"))
+mkpath(results_dir)
+Random.seed!(31)
+
+function write_csv(path, headers, rows)
+    open(path, "w") do io
+        println(io, join(headers, ","))
+        for row in rows
+            println(io, join(string.(row), ","))
+        end
+    end
+end
+
+function rk4_step(f, t, y, h)
+    k1 = f(t, y)
+    k2 = f(t + h / 2, y .+ h .* k1 ./ 2)
+    k3 = f(t + h / 2, y .+ h .* k2 ./ 2)
+    k4 = f(t + h, y .+ h .* k3)
+    return y .+ h .* (k1 .+ 2 .* k2 .+ 2 .* k3 .+ k4) ./ 6
+end
+
+function simulate_des(; beta = 0.42, gamma = 0.12, s0 = 95, i0 = 5, t_max = 60.0)
+    S, I, R = s0, i0, 0
+    N = S + I
+    t = 0.0
+    rows = Vector{Tuple{Float64, Int, Int, Int}}()
+    while t <= t_max && I > 0
+        push!(rows, (t, S, I, R))
+        infection = beta * S * I / N
+        recovery = gamma * I
+        total = infection + recovery
+        dt = -log(rand()) / total
+        t += dt
+        if rand() < infection / total
+            S -= 1
+            I += 1
+        else
+            I -= 1
+            R += 1
+        end
+    end
+    push!(rows, (t, S, I, R))
+    return rows
+end
+
+function simulate_det(; beta = 0.42, gamma = 0.12, s0 = 95.0, i0 = 5.0, t_max = 60.0, h = 0.2)
+    y = [s0, i0, 0.0]
+    f(t, y) = begin
+        s, i, r = y
+        N = s + i + r
+        [-beta * s * i / N, beta * s * i / N - gamma * i, gamma * i]
+    end
+    steps = Int(round(t_max / h))
+    rows = Vector{Tuple{Float64, Float64, Float64, Float64}}()
+    t = 0.0
+    for _ in 0:steps
+        push!(rows, (t, y[1], y[2], y[3]))
+        y = rk4_step(f, t, y, h)
+        t += h
+    end
+    return rows
+end
+
+des_rows = simulate_des()
+det_rows = simulate_det()
+
+compare_rows = Vector{Vector{String}}()
+grid = 0.0:0.5:60.0
+let des_idx = 1
+    for t in grid
+        while des_idx < length(des_rows) && des_rows[des_idx + 1][1] <= t
+            des_idx += 1
+        end
+        det_idx = Int(round(t / 0.2)) + 1
+        push!(compare_rows, [@sprintf("%.2f", t), string(des_rows[des_idx][3]), @sprintf("%.4f", det_rows[det_idx][3])])
+    end
+end
+write_csv(joinpath(results_dir, "des_sir_compare.csv"), ["time", "I_des", "I_det"], compare_rows)
+
+sweep_rows = Vector{Vector{String}}()
+for beta in 0.24:0.06:0.54
+    rows = simulate_des(beta = beta)
+    peak_i = maximum(getindex.(rows, 3))
+    push!(sweep_rows, [@sprintf("%.2f", beta), string(peak_i)])
+end
+write_csv(joinpath(results_dir, "des_sir_sweep.csv"), ["beta", "peak_infected"], sweep_rows)
+println("lab08 done")
+```
+
+Таблицы из этой лабораторной демонстрируют различие между гладкой детерминированной кривой и ступенчатой событийной траекторией.

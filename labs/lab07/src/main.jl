@@ -1,0 +1,100 @@
+# Этот файл сгенерирован автоматически из qmd-источника.
+
+using Random
+using Printf
+using Statistics
+
+results_dir = normpath(joinpath(@__DIR__, "..", "results", "data"))
+mkpath(results_dir)
+Random.seed!(19)
+
+function write_csv(path, headers, rows)
+    open(path, "w") do io
+        println(io, join(headers, ","))
+        for row in rows
+            println(io, join(string.(row), ","))
+        end
+    end
+end
+
+exp_time(rate) = -log(rand()) / rate
+
+function simulate_mmc(; lambda = 1.4, mu = 0.9, c = 2, t_max = 60.0)
+    t = 0.0
+    next_arrival = exp_time(lambda)
+    departures = Float64[]
+    queue = 0
+    busy = 0
+    rows = Vector{Vector{String}}()
+    while t < t_max
+        next_departure = isempty(departures) ? Inf : minimum(departures)
+        if next_arrival < next_departure
+            t = next_arrival
+            next_arrival += exp_time(lambda)
+            if busy < c
+                busy += 1
+                push!(departures, t + exp_time(mu))
+            else
+                queue += 1
+            end
+        else
+            t = next_departure
+            idx = argmin(departures)
+            deleteat!(departures, idx)
+            if queue > 0
+                queue -= 1
+                push!(departures, t + exp_time(mu))
+            else
+                busy -= 1
+            end
+        end
+        push!(rows, [@sprintf("%.4f", t), string(queue), string(busy)])
+    end
+    return rows
+end
+
+function simulate_ross_once(; reserve = 2, running = 6, failure_rate = 0.07, repair_rate = 0.22)
+    t = 0.0
+    reserve_now = reserve
+    repair_queue = 0
+    repair_busy = false
+    next_repair = Inf
+    while true
+        next_failure = t + exp_time(failure_rate * running)
+        if next_failure < next_repair
+            t = next_failure
+            if reserve_now > 0
+                reserve_now -= 1
+                repair_queue += 1
+                if !repair_busy
+                    repair_busy = true
+                    repair_queue -= 1
+                    next_repair = t + exp_time(repair_rate)
+                end
+            else
+                return t
+            end
+        else
+            t = next_repair
+            reserve_now += 1
+            if repair_queue > 0
+                repair_queue -= 1
+                next_repair = t + exp_time(repair_rate)
+            else
+                repair_busy = false
+                next_repair = Inf
+            end
+        end
+    end
+end
+
+mmc_rows = simulate_mmc()
+write_csv(joinpath(results_dir, "mmc_timeseries.csv"), ["time", "queue_length", "busy_servers"], mmc_rows)
+
+ross_rows = Vector{Vector{String}}()
+for reserve in 1:4
+    samples = [simulate_ross_once(reserve = reserve) for _ in 1:120]
+    push!(ross_rows, [string(reserve), @sprintf("%.4f", mean(samples))])
+end
+write_csv(joinpath(results_dir, "ross_summary.csv"), ["reserve", "mean_crash_time"], ross_rows)
+println("lab07 done")

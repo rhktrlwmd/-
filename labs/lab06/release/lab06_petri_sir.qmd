@@ -1,0 +1,60 @@
+# SIR через сеть Петри
+
+Модель SIR естественно представляется сетью Петри: места соответствуют состояниям `S`, `I`, `R`, а переходы — заражению и выздоровлению. В работе используется стохастическая имитация firing-событий методом Гиллеспи.
+
+```{julia}
+using Random
+using Printf
+
+results_dir = normpath(joinpath(@__DIR__, "..", "results", "data"))
+mkpath(results_dir)
+Random.seed!(11)
+
+function write_csv(path, headers, rows)
+    open(path, "w") do io
+        println(io, join(headers, ","))
+        for row in rows
+            println(io, join(string.(row), ","))
+        end
+    end
+end
+
+function simulate_petri_sir(; beta = 0.46, gamma = 0.12, s0 = 95, i0 = 5, t_max = 80.0)
+    S, I, R = s0, i0, 0
+    N = S + I
+    t = 0.0
+    rows = Vector{Vector{String}}()
+    while t <= t_max && I > 0
+        push!(rows, [@sprintf("%.4f", t), string(S), string(I), string(R)])
+        infection = beta * S * I / N
+        recovery = gamma * I
+        total = infection + recovery
+        dt = -log(rand()) / total
+        t += dt
+        if rand() < infection / total
+            S -= 1
+            I += 1
+        else
+            I -= 1
+            R += 1
+        end
+    end
+    push!(rows, [@sprintf("%.4f", t), string(S), string(I), string(R)])
+    return rows
+end
+
+main_rows = simulate_petri_sir()
+write_csv(joinpath(results_dir, "petri_sir.csv"), ["time", "S", "I", "R"], main_rows)
+
+sweep_rows = Vector{Vector{String}}()
+for beta in 0.20:0.08:0.60
+    rows = simulate_petri_sir(beta = beta)
+    final_r = rows[end][4]
+    push!(sweep_rows, [@sprintf("%.2f", beta), final_r])
+end
+write_csv(joinpath(results_dir, "petri_sir_sweep.csv"), ["beta", "final_recovered"], sweep_rows)
+println("lab06 done")
+```
+
+Файлы содержат как одну реализацию траектории, так и параметрический прогон по коэффициенту заражения.
+

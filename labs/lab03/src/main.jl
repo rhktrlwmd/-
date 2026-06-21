@@ -1,0 +1,64 @@
+# Этот файл сгенерирован автоматически из qmd-источника.
+
+using Random
+using Printf
+
+results_dir = normpath(joinpath(@__DIR__, "..", "results", "data"))
+mkpath(results_dir)
+Random.seed!(42)
+
+function write_csv(path, headers, rows)
+    open(path, "w") do io
+        println(io, join(headers, ","))
+        for row in rows
+            println(io, join(string.(row), ","))
+        end
+    end
+end
+
+function simulate_daisyworld(; luminosity = 1.0, steps = 120, n = 24)
+    grid = rand(0:2, n, n)
+    rows = Vector{Vector{String}}()
+    for step in 1:steps
+        black = count(==(1), grid)
+        white = count(==(2), grid)
+        total = n * n
+        black_ratio = black / total
+        white_ratio = white / total
+        albedo = 0.25 * black_ratio + 0.75 * white_ratio + 0.5 * (1 - black_ratio - white_ratio)
+        temperature = 8 + 32 * luminosity - 18 * albedo
+        push!(rows, [string(step), string(black), string(white), @sprintf("%.4f", temperature)])
+
+        next_grid = copy(grid)
+        growth = clamp(1.0 - abs(temperature - 22.0) / 20.0, 0.0, 1.0)
+        for i in 1:n, j in 1:n
+            cell = grid[i, j]
+            if cell == 0
+                if rand() < 0.12 * growth
+                    next_grid[i, j] = rand() < 0.5 ? 1 : 2
+                end
+            else
+                death_prob = 0.03 + 0.12 * (1 - growth)
+                if rand() < death_prob
+                    next_grid[i, j] = 0
+                end
+            end
+        end
+        grid = next_grid
+    end
+    return rows
+end
+
+main_rows = simulate_daisyworld(luminosity = 1.0)
+write_csv(joinpath(results_dir, "daisy_timeseries.csv"), ["step", "black", "white", "temperature"], main_rows)
+
+sweep_rows = Vector{Vector{String}}()
+for luminosity in 0.7:0.1:1.3
+    rows = simulate_daisyworld(luminosity = luminosity, steps = 90)
+    final_temperature = rows[end][4]
+    final_black = rows[end][2]
+    final_white = rows[end][3]
+    push!(sweep_rows, [@sprintf("%.2f", luminosity), final_temperature, final_black, final_white])
+end
+write_csv(joinpath(results_dir, "daisy_sweep.csv"), ["luminosity", "final_temperature", "final_black", "final_white"], sweep_rows)
+println("lab03 done")

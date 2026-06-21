@@ -1,0 +1,56 @@
+# Этот файл сгенерирован автоматически из qmd-источника.
+
+using DelimitedFiles
+using Printf
+
+results_dir = normpath(joinpath(@__DIR__, "..", "results", "data"))
+mkpath(results_dir)
+
+function write_csv(path, headers, rows)
+    open(path, "w") do io
+        println(io, join(headers, ","))
+        for row in rows
+            println(io, join(string.(row), ","))
+        end
+    end
+end
+
+function rk4_step(f, t, y, h)
+    k1 = f(t, y)
+    k2 = f(t + h / 2, y .+ h .* k1 ./ 2)
+    k3 = f(t + h / 2, y .+ h .* k2 ./ 2)
+    k4 = f(t + h, y .+ h .* k3)
+    return y .+ h .* (k1 .+ 2 .* k2 .+ 2 .* k3 .+ k4) ./ 6
+end
+
+function solve_model(f, y0, t_max, h)
+    steps = Int(round(t_max / h))
+    t = [i * h for i in 0:steps]
+    y = Vector{Vector{Float64}}(undef, length(t))
+    y[1] = copy(y0)
+    for i in 2:length(t)
+        y[i] = rk4_step(f, t[i - 1], y[i - 1], h)
+    end
+    return t, y
+end
+
+β, γ = 0.38, 0.11
+sir0 = [0.97, 0.03, 0.0]
+sir_f(t, y) = begin
+    s, i, r = y
+    [-β * s * i, β * s * i - γ * i, γ * i]
+end
+t_sir, y_sir = solve_model(sir_f, sir0, 80.0, 0.2)
+sir_rows = [[@sprintf("%.3f", t_sir[i]), @sprintf("%.6f", y_sir[i][1]), @sprintf("%.6f", y_sir[i][2]), @sprintf("%.6f", y_sir[i][3])] for i in eachindex(t_sir)]
+write_csv(joinpath(results_dir, "sir.csv"), ["time", "S", "I", "R"], sir_rows)
+
+α, δ, c, d = 0.9, 0.04, 0.6, 0.03
+lv0 = [30.0, 4.0]
+lv_f(t, y) = begin
+    prey, predator = y
+    [α * prey - δ * prey * predator, -c * predator + d * prey * predator]
+end
+t_lv, y_lv = solve_model(lv_f, lv0, 60.0, 0.1)
+lv_rows = [[@sprintf("%.3f", t_lv[i]), @sprintf("%.6f", y_lv[i][1]), @sprintf("%.6f", y_lv[i][2])] for i in eachindex(t_lv)]
+write_csv(joinpath(results_dir, "lotka_volterra.csv"), ["time", "prey", "predator"], lv_rows)
+println("lab02 done")
