@@ -14,17 +14,21 @@ echo "Pushing tag..."
 git push origin v1.0.0
 
 echo "Collecting release assets..."
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
 assets=()
 for lab in labs/lab*; do
-  assets+=(
-    "$lab/report/report.docx"
-    "$lab/report/report.pdf"
-    "$lab/presentation/presentation.html"
-    "$lab/presentation/presentation.pdf"
-    "$lab/presentation/presentation.md"
-    "$lab/report/report.md"
-    "$lab/release/"*.zip
-  )
+  lab_name="$(basename "$lab")"
+  cp "$lab/report/report.docx" "$tmpdir/${lab_name}-report.docx"
+  cp "$lab/report/report.pdf" "$tmpdir/${lab_name}-report.pdf"
+  cp "$lab/report/report.md" "$tmpdir/${lab_name}-report.md"
+  cp "$lab/presentation/presentation.html" "$tmpdir/${lab_name}-presentation.html"
+  cp "$lab/presentation/presentation.pdf" "$tmpdir/${lab_name}-presentation.pdf"
+  cp "$lab/presentation/presentation.md" "$tmpdir/${lab_name}-presentation.md"
+  cp "$lab/release/"*.zip "$tmpdir/"
+done
+for asset in "$tmpdir"/*; do
+  assets+=("$asset")
 done
 
 echo "Creating or updating release..."
