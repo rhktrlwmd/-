@@ -128,6 +128,84 @@ def load_course_info() -> dict:
     return json.loads(COURSE_INFO.read_text(encoding="utf-8"))
 
 
+def lab_number(spec: dict) -> int:
+    match = re.search(r"(\d+)", spec["id"])
+    return int(match.group(1)) if match else 0
+
+
+def parse_markdown_table(table: str) -> tuple[list[str], list[list[str]]]:
+    lines = [line.strip() for line in table.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return [], []
+    headers = [cell.strip() for cell in lines[0].strip("|").split("|")]
+    rows = []
+    for line in lines[2:]:
+        rows.append([cell.strip() for cell in line.strip("|").split("|")])
+    return headers, rows
+
+
+def summary_bullets(summary_table: str) -> list[str]:
+    headers, rows = parse_markdown_table(summary_table)
+    if not headers or not rows:
+        return ["Основные численные результаты приведены в отчёте и на итоговых графиках."]
+    bullets = []
+    for row in rows[:5]:
+        pairs = [f"{header} = {value}" for header, value in zip(headers, row)]
+        bullets.append(", ".join(pairs))
+    return bullets
+
+
+def load_bibliography() -> dict[str, dict[str, str]]:
+    text = BIB.read_text(encoding="utf-8")
+    entries: dict[str, dict[str, str]] = {}
+    pattern = re.compile(r"@\w+\{([^,]+),\s*(.*?)\n\}", re.DOTALL)
+    field_pattern = re.compile(r"(\w+)\s*=\s*\{(.*?)\}", re.DOTALL)
+    for key, body in pattern.findall(text):
+        fields = {name.lower(): " ".join(value.split()) for name, value in field_pattern.findall(body)}
+        entries[key] = fields
+    return entries
+
+
+def format_reference(entry: dict[str, str]) -> str:
+    author = entry.get("author", "Неизвестный автор")
+    title = entry.get("title", "Без названия")
+    year = entry.get("year", "б/г")
+    venue = entry.get("journal") or entry.get("publisher") or ""
+    if venue:
+        return f"{author}. {title}. {venue}, {year}."
+    return f"{author}. {title}. {year}."
+
+
+def bibliography_lines(citation_keys: list[str]) -> list[str]:
+    bibliography = load_bibliography()
+    lines = []
+    for key in citation_keys:
+        entry = bibliography.get(key)
+        if entry:
+            lines.append(f"1. {format_reference(entry)}")
+    return lines
+
+
+def relative_figure_path(rel_path: str) -> str:
+    return str(Path("..") / rel_path)
+
+
+def typst_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def typst_table_rows(summary_table: str) -> tuple[list[str], list[list[str]]]:
+    headers, rows = parse_markdown_table(summary_table)
+    if not headers:
+        return ["Показатель", "Значение"], [["Итог", "См. текст отчёта"]]
+    return headers, rows
+
+
+def write_typst_pdf(source: str, typ_path: Path, pdf_path: Path) -> None:
+    typ_path.write_text(source, encoding="utf-8")
+    run_command(["typst", "compile", "--root", str(ROOT), str(typ_path), str(pdf_path)], cwd=typ_path.parent)
+
+
 def ensure_dirs(*paths: Path) -> None:
     for path in paths:
         path.mkdir(parents=True, exist_ok=True)
@@ -418,109 +496,326 @@ PLOTTERS = {
 
 def report_markdown(spec: dict, info: dict, summary_table: str) -> str:
     figure_blocks = []
-    figure_labels = []
-    for rel_path, caption, label in spec["figures"]:
-        figure_blocks.append(f"![{caption}]({Path('..') / rel_path}){{#{label}}}")
-        figure_labels.append(label)
-    citation_text = " ".join(f"[@{key}]" for key in spec["citations"])
-    return textwrap.dedent(
-        f"""\
-        # {spec["title"]}
+    for index, (rel_path, caption, _label) in enumerate(spec["figures"], start=1):
+        figure_blocks.extend(
+            [
+                f"![{caption}]({relative_figure_path(rel_path)})",
+                f"*Рисунок {index} — {caption}*",
+                "",
+            ]
+        )
 
-        **Дисциплина:** {info["course_name"]}  
-        **Студент:** {info["student_name"]}  
-        **Группа:** {info["group"]}  
-        **Преподаватель:** {info["teacher_name"]}, {info["teacher_title"]}  
-        **Организация:** {info["organization"]}  
-        **Год:** {info["year"]}
-
-        ## Цель работы
-
-        {spec["objective"]}
-
-        ## Теоретические сведения
-
-        Работа опирается на классические результаты и подходы, описанные в литературе {citation_text}. В рамках лабораторной работы использован литературный формат исходников: основной сценарий хранится в `qmd`, из него автоматически генерируются чистый `Julia`-код, ноутбук `ipynb` и документы для отчётности.
-
-        ## Ход выполнения
-
-        1. Подготовлен литературный источник в формате `qmd`.
-        2. Из источника автоматически извлечён чистый исполняемый код `Julia`.
-        3. Проведён вычислительный эксперимент и сохранены табличные результаты.
-        4. На основе табличных данных построены иллюстрации и сводные таблицы.
-
-        ## Результаты моделирования
-
-        {'\n\n'.join(figure_blocks)}
-
-        Таблица основных результатов:
-
-        {summary_table}
-
-        ## Анализ результатов
-
-        График @{figure_labels[0]} показывает основную динамику модели, а @{figure_labels[1]} иллюстрирует чувствительность модели к изменению параметров. По полученным траекториям видно, что модель корректно воспроизводит ожидаемое качественное поведение системы и может использоваться для сравнительного анализа сценариев.
-
-        ## Выводы
-
-        В ходе выполнения лабораторной работы был получен воспроизводимый набор артефактов: литературный источник, исполняемый код, ноутбук, отчёт, презентация и архив исходных материалов. Автоматическая сборка позволяет быстро обновлять результаты после изменения параметров эксперимента.
-
-        ## Список литературы
-        """
-    ).strip() + "\n"
+    lines = [
+        f"# {spec['title']}",
+        "",
+        '<p align="center"><strong>ОТЧЁТ</strong></p>',
+        f'<p align="center">по лабораторной работе №{lab_number(spec)}</p>',
+        f'<p align="center">«{spec["subtitle"]}»</p>',
+        f'<p align="center">по дисциплине «{info["course_name"]}»</p>',
+        "",
+        "| Параметр | Значение |",
+        "| --- | --- |",
+        f"| Студент | {info['student_name']} |",
+        f"| Группа | {info['group']} |",
+        f"| Преподаватель | {info['teacher_name']}, {info['teacher_title']} |",
+        f"| Организация | {info['organization']} |",
+        f"| Год | {info['year']} |",
+        "",
+        "## Цель работы",
+        "",
+        spec["objective"],
+        "",
+        "## Теоретические сведения",
+        "",
+        "Работа опирается на классические модели и публикации по теме имитационного моделирования. Для лабораторной работы сохранён воспроизводимый подход: основной сценарий хранится в `qmd`, из него автоматически формируются чистый `Julia`-код, ноутбук `ipynb` и итоговые отчётные материалы.",
+        "",
+        "## Ход выполнения",
+        "",
+        "1. Подготовлен литературный источник в формате `qmd`.",
+        "2. Из источника автоматически извлечён исполняемый код `Julia`.",
+        "3. Проведён вычислительный эксперимент и сохранены табличные результаты.",
+        "4. На основе результатов построены графики и подготовлены материалы для отчёта и презентации.",
+        "",
+        "## Результаты моделирования",
+        "",
+        *figure_blocks,
+        "Таблица основных результатов:",
+        "",
+        summary_table,
+        "",
+        "## Анализ результатов",
+        "",
+        "Первый график отражает основную динамику исследуемой модели, а второй показывает чувствительность результата к изменению параметров. По полученным траекториям видно, что модель устойчиво воспроизводит ожидаемое качественное поведение системы и подходит для сравнительного анализа сценариев.",
+        "",
+        "## Выводы",
+        "",
+        "В ходе выполнения лабораторной работы получен полный воспроизводимый комплект материалов: литературный источник, исполняемый код, ноутбук, отчёт, презентация и архив исходных данных. Единая автоматическая сборка позволяет быстро обновлять результаты после изменения параметров эксперимента.",
+        "",
+        "## Список литературы",
+        "",
+        *bibliography_lines(spec["citations"]),
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def presentation_markdown(spec: dict, info: dict, summary_table: str) -> str:
-    rows = "\n".join(f"- {line.strip()}" for line in summary_table.splitlines()[2:] if line.strip())
-    return textwrap.dedent(
-        f"""\
-        % {spec["title"]}
-        % {info["student_name"]}
-        % {info["organization"]}
+    result_bullets = summary_bullets(summary_table)
+    first_figure = spec["figures"][0]
+    second_figure = spec["figures"][1]
+    lines = [
+        f"% {spec['title']}",
+        f"% {info['student_name']}",
+        f"% {info['organization']}",
+        "",
+        f"# {spec['title']}",
+        "",
+        f"- Дисциплина: {info['course_name']}",
+        f"- Студент: {info['student_name']}",
+        f"- Группа: {info['group']}",
+        f"- Преподаватель: {info['teacher_name']}",
+        "",
+        "---",
+        "",
+        "# Цель и задачи",
+        "",
+        f"- {spec['objective']}",
+        "- Подготовить литературный источник, чистый код, ноутбук, отчёт и презентацию.",
+        "- Провести вычислительный эксперимент и интерпретировать результаты.",
+        "",
+        "---",
+        "",
+        "# Ход выполнения",
+        "",
+        "- Основной сценарий оформлен в `qmd`.",
+        "- Из него автоматически собираются `Julia`-скрипт и `ipynb`.",
+        "- Результаты сохраняются в `csv`, после чего строятся итоговые графики.",
+        "",
+        "---",
+        "",
+        "# Основной результат",
+        "",
+        f"![{first_figure[1]}]({relative_figure_path(first_figure[0])})",
+        "",
+        f"*{first_figure[1]}*",
+        "",
+        "---",
+        "",
+        "# Анализ чувствительности",
+        "",
+        f"![{second_figure[1]}]({relative_figure_path(second_figure[0])})",
+        "",
+        f"*{second_figure[1]}*",
+        "",
+        "---",
+        "",
+        "# Ключевые численные результаты",
+        "",
+        *[f"- {bullet}" for bullet in result_bullets],
+        "",
+        "---",
+        "",
+        "# Выводы",
+        "",
+        "- Получена воспроизводимая лабораторная работа в едином академическом шаблоне.",
+        "- Подготовлены материалы для отчёта, презентации и публикации в репозитории.",
+        "- Результаты можно использовать для защиты и дальнейшего сравнения сценариев.",
+        "",
+    ]
+    return "\n".join(lines)
 
-        # {spec["title"]}
 
-        - Дисциплина: {info["course_name"]}
-        - Студент: {info["student_name"]}
-        - Преподаватель: {info["teacher_name"]}, {info["teacher_title"]}
+def report_typst(spec: dict, info: dict, summary_table: str) -> str:
+    headers, rows = typst_table_rows(summary_table)
+    bibliography = bibliography_lines(spec["citations"])
+    table_cells = [f"    [{header}]," for header in headers]
+    for row in rows:
+        table_cells.extend(f"    [{value}]," for value in row)
 
-        ---
+    figure_blocks = []
+    for rel_path, caption, _label in spec["figures"]:
+        figure_blocks.extend(
+            [
+                "#figure(",
+                f"  image({typst_string(relative_figure_path(rel_path))}, width: 86%),",
+                f"  caption: [{caption}],",
+                ")",
+                "",
+            ]
+        )
 
-        # Актуальность
+    references_block = "\n".join(f"- {line[3:]}" for line in bibliography) if bibliography else "- Источники приведены в общем репозитории."
+    table_block = "\n".join(table_cells)
+    return "\n".join(
+        [
+            "#set page(margin: (left: 3cm, right: 1.8cm, top: 2cm, bottom: 2cm))",
+            '#set text(font: "Times New Roman", size: 14pt)',
+            '#set heading(numbering: none)',
+            "#show figure.caption: set text(size: 11pt, style: \"italic\")",
+            "",
+            f"#let course_name = {typst_string(info['course_name'])}",
+            f"#let student_name = {typst_string(info['student_name'])}",
+            f"#let group_name = {typst_string(info['group'])}",
+            f"#let teacher_name = {typst_string(info['teacher_name'])}",
+            f"#let teacher_title = {typst_string(info['teacher_title'])}",
+            f"#let lab_title = {typst_string(spec['title'])}",
+            f"#let lab_subtitle = {typst_string(spec['subtitle'])}",
+            f"#let objective = {typst_string(spec['objective'])}",
+            f"#let year = {typst_string(info['year'])}",
+            "",
+            "#align(center)[",
+            "  МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ \\",
+            "  РОССИЙСКОЙ ФЕДЕРАЦИИ \\",
+            "  Федеральное государственное автономное образовательное учреждение высшего образования \\",
+            "  «РОССИЙСКИЙ УНИВЕРСИТЕТ ДРУЖБЫ НАРОДОВ ИМЕНИ ПАТРИСА ЛУМУМБЫ» \\",
+            "  Факультет физико-математических и естественных наук \\",
+            "  Кафедра математического моделирования и искусственного интеллекта",
+            "]",
+            "",
+            "#v(3.0cm)",
+            "#align(center)[#text(size: 18pt, weight: \"bold\")[ОТЧЁТ]]",
+            f"#align(center)[по лабораторной работе №{lab_number(spec)}]",
+            "#align(center)[#lab_title]",
+            "#align(center)[по дисциплине «#course_name»]",
+            "",
+            "#v(3.5cm)",
+            "#align(right)[",
+            "  Выполнила: #student_name \\",
+            "  Группа: #group_name \\",
+            "  Преподаватель: #teacher_name, #teacher_title",
+            "]",
+            "",
+            "#v(4.5cm)",
+            "#align(center)[Москва, #year]",
+            "",
+            "#pagebreak()",
+            "",
+            "= Цель работы",
+            "#objective",
+            "",
+            "= Теоретические сведения",
+            "Работа основана на классических моделях имитационного моделирования и на воспроизводимой вычислительной схеме: литературный источник, исполняемый код, таблицы результатов и итоговые визуализации собираются автоматически в едином шаблоне.",
+            "",
+            "= Ход выполнения",
+            "1. Подготовлен литературный источник в формате qmd.",
+            "2. Из источника автоматически сформирован исполняемый Julia-код.",
+            "3. Выполнен вычислительный эксперимент и сохранены результаты.",
+            "4. По полученным данным построены графики и сводные таблицы.",
+            "",
+            "= Результаты моделирования",
+            "",
+            *figure_blocks,
+            "#figure(",
+            f"  table(columns: {len(headers)},",
+            "    stroke: rgb(\"#B8C2CC\"),",
+            "    inset: 8pt,",
+            "    fill: (x, y) => if y == 0 { rgb(\"#EAF1F8\") } else { white },",
+            table_block,
+            "  ),",
+            "  caption: [Таблица основных результатов],",
+            ")",
+            "",
+            "= Анализ результатов",
+            "Первый график показывает основную динамику модели, а второй отражает чувствительность результатов к изменению параметров. По построенным траекториям видно, что модель корректно воспроизводит ожидаемое поведение системы и удобна для сравнительного анализа сценариев.",
+            "",
+            "= Выводы",
+            "В результате выполнения лабораторной работы подготовлен полный комплект воспроизводимых материалов: исходники, код, ноутбук, отчёт, презентация и архив исходных данных. Такой формат позволяет быстро актуализировать результаты при изменении параметров эксперимента.",
+            "",
+            "= Список литературы",
+            references_block,
+            "",
+        ]
+    )
 
-        - Имитационное моделирование позволяет анализировать сложные динамические системы без дорогостоящих натурных экспериментов.
-        - Выбранная постановка демонстрирует воспроизводимый вычислительный эксперимент с возможностью параметрического анализа.
 
-        ---
+def presentation_typst(spec: dict, info: dict, summary_table: str) -> str:
+    headers, rows = typst_table_rows(summary_table)
+    result_bullets = summary_bullets(summary_table)
+    first_figure = spec["figures"][0]
+    second_figure = spec["figures"][1]
 
-        # Цель и задачи
+    table_cells = [f"    [{header}]," for header in headers]
+    for row in rows[:5]:
+        table_cells.extend(f"    [{value}]," for value in row)
 
-        - {spec["objective"]}
-        - Подготовить литературный источник, чистый код, ноутбук, отчёт и презентацию.
-        - Выполнить анализ чувствительности модели.
-
-        ---
-
-        # Реализация
-
-        - Основной исходник оформлен в `qmd`.
-        - Чистый `Julia`-скрипт и `ipynb` формируются автоматически.
-        - Результаты сохраняются в `csv`, после чего строятся итоговые графики.
-
-        ---
-
-        # Основные результаты
-
-        {rows if rows else "- Основные результаты представлены в отчёте и на графиках."}
-
-        ---
-
-        # Выводы
-
-        - Получена воспроизводимая лабораторная работа в едином шаблоне.
-        - Подготовлены материалы для защиты и публикации в репозитории.
-        """
-    ).strip() + "\n"
+    bullet_lines = "\n".join(f"- {bullet}" for bullet in result_bullets)
+    return "\n".join(
+        [
+            "#set page(width: 33.87cm, height: 19.05cm, margin: (left: 1.3cm, right: 1.3cm, top: 1.0cm, bottom: 1.0cm))",
+            '#set text(font: "Arial", size: 18pt, fill: rgb("#1F2933"))',
+            "#set heading(numbering: none)",
+            "#let accent = rgb(\"#0F4C81\")",
+            "#let soft = rgb(\"#EAF1F8\")",
+            "",
+            f"#let course_name = {typst_string(info['course_name'])}",
+            f"#let student_name = {typst_string(info['student_name'])}",
+            f"#let group_name = {typst_string(info['group'])}",
+            f"#let teacher_name = {typst_string(info['teacher_name'])}",
+            f"#let lab_title = {typst_string(spec['title'])}",
+            f"#let objective = {typst_string(spec['objective'])}",
+            "",
+            "#let slide_title(title) = block(width: 100%, fill: accent, inset: 10pt, radius: 10pt)[#text(fill: white, size: 26pt, weight: \"bold\")[#title]]",
+            "",
+            "#v(2.0cm)",
+            "#align(center)[#text(size: 28pt, weight: \"bold\", fill: accent)[#lab_title]]",
+            "#v(0.4cm)",
+            "#align(center)[#text(size: 18pt)[по дисциплине «#course_name»]]",
+            "#v(1.4cm)",
+            "#align(center)[Студент: #student_name]",
+            "#align(center)[Группа: #group_name]",
+            "#align(center)[Преподаватель: #teacher_name]",
+            "",
+            "#pagebreak()",
+            "#slide_title([Цель и задачи])",
+            "#v(0.5cm)",
+            "- #objective",
+            "- Подготовить литературный источник, код, ноутбук, отчёт и презентацию.",
+            "- Выполнить вычислительный эксперимент и интерпретировать результаты.",
+            "",
+            "#pagebreak()",
+            "#slide_title([Ход выполнения])",
+            "#v(0.5cm)",
+            "- Основной сценарий оформлен в формате qmd.",
+            "- Из источника автоматически собираются Julia-скрипт и ipynb.",
+            "- Результаты эксперимента сохраняются в csv и визуализируются графиками.",
+            "",
+            "#pagebreak()",
+            "#slide_title([Основной результат])",
+            "#v(0.4cm)",
+            "#figure(",
+            f"  image({typst_string(relative_figure_path(first_figure[0]))}, height: 11.5cm),",
+            f"  caption: [{first_figure[1]}],",
+            ")",
+            "",
+            "#pagebreak()",
+            "#slide_title([Анализ чувствительности])",
+            "#v(0.4cm)",
+            "#figure(",
+            f"  image({typst_string(relative_figure_path(second_figure[0]))}, height: 11.5cm),",
+            f"  caption: [{second_figure[1]}],",
+            ")",
+            "",
+            "#pagebreak()",
+            "#slide_title([Ключевые результаты])",
+            "#v(0.5cm)",
+            bullet_lines,
+            "#v(0.5cm)",
+            f"#table(columns: {len(headers)},",
+            "  stroke: rgb(\"#B8C2CC\"),",
+            "  inset: 8pt,",
+            "  fill: (x, y) => if y == 0 { soft } else { white },",
+            *table_cells,
+            ")",
+            "",
+            "#pagebreak()",
+            "#slide_title([Выводы])",
+            "#v(0.5cm)",
+            "- Лабораторная работа оформлена в едином академическом стиле.",
+            "- Подготовлены материалы для показа преподавателю и публикации в репозитории.",
+            "- Полученные результаты можно использовать для сравнения альтернативных сценариев.",
+            "",
+        ]
+    )
 
 
 def pandoc_report(md_path: Path, pdf_path: Path, docx_path: Path) -> None:
@@ -530,14 +825,10 @@ def pandoc_report(md_path: Path, pdf_path: Path, docx_path: Path) -> None:
         "pandoc",
         str(md_path),
         "--from",
-        "markdown+implicit_figures+table_captions+citations",
+        "markdown+implicit_figures+table_captions",
         "--standalone",
-        "--citeproc",
-        "--bibliography",
-        str(BIB),
     ]
     run_command(common + ["-o", str(docx_path)], cwd=md_path.parent, env=env)
-    run_command(common + ["--pdf-engine=typst", "-o", str(pdf_path)], cwd=md_path.parent, env=env)
 
 
 def pandoc_slides(md_path: Path, html_path: Path, pdf_path: Path) -> None:
@@ -553,18 +844,6 @@ def pandoc_slides(md_path: Path, html_path: Path, pdf_path: Path) -> None:
             "--self-contained",
             "-o",
             str(html_path),
-        ],
-        cwd=md_path.parent,
-        env=env,
-    )
-    run_command(
-        [
-            "pandoc",
-            str(md_path),
-            "--standalone",
-            "--pdf-engine=typst",
-            "-o",
-            str(pdf_path),
         ],
         cwd=md_path.parent,
         env=env,
@@ -612,7 +891,13 @@ def build_lab(spec: dict, info: dict) -> None:
     presentation_md.write_text(presentation_markdown(spec, info, summary_table), encoding="utf-8")
 
     pandoc_report(report_md, report_dir / "report.pdf", report_dir / "report.docx")
+    write_typst_pdf(report_typst(spec, info, summary_table), report_dir / "report.typ", report_dir / "report.pdf")
     pandoc_slides(presentation_md, presentation_dir / "presentation.html", presentation_dir / "presentation.pdf")
+    write_typst_pdf(
+        presentation_typst(spec, info, summary_table),
+        presentation_dir / "presentation.typ",
+        presentation_dir / "presentation.pdf",
+    )
     zip_sources(lab_dir)
 
 
